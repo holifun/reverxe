@@ -2,8 +2,8 @@ name: Build & Publish Multi-Arch to GHCR
 
 on:
   push:
-    branches: [ main, master ]   # 推送到默认分支自动构建 latest
-    tags: [ 'v*.*.*' ]           # 推送语义化 tag 自动构建版本标签
+    branches: [ main, master ]
+    tags: [ 'v*.*.*' ]
     paths:
       - 'Dockerfile'
       - '.github/workflows/publish-ghcr.yml'
@@ -16,7 +16,7 @@ on:
 
 permissions:
   contents: read
-  packages: write   # 推送到 GHCR 需要
+  packages: write
 
 env:
   REGISTRY: ghcr.io
@@ -46,19 +46,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
+      - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # 关键：去掉无效的 {{is_tag}}；latest 用 is_default_branch；semver 不加 enable
           tags: |
-            # 默认分支 → latest
+            # 默认分支产出 latest
             type=raw,value=latest,enable={{is_default_branch}}
-            # 语义化标签 → vX.Y.Z / vX.Y / vX
-            type=semver,pattern={{version}},enable={{is_tag}}
-            type=semver,pattern={{major}}.{{minor}},enable={{is_tag}}
-            type=semver,pattern={{major}},enable={{is_tag}}
-            # 每次构建加一个短 SHA 方便回滚
+            # 分支/PR 名称（可留着用于非默认分支调试）
+            type=ref,event=branch
+            type=ref,event=pr
+            # 语义化 tag（仅在 tag 事件生效）
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            # 备用 sha 标签
             type=sha,format=short
 
       - name: Build & Push (multi-arch)
