@@ -1,38 +1,51 @@
-# syntax=docker/dockerfile:1.6                                                                                                                                  
+# syntax=docker/dockerfile:1.6
 
 FROM alpine:3.19 AS builder
 ARG TARGETARCH
 # 可选：指定上游版本；不填为 latest
 ARG XRAY_VERSION=latest
 
-RUN set -eux; \
-    apk add --no-cache curl jq unzip ca-certificates; \
-    # 解析版本
-    if [ "$XRAY_VERSION" = "latest" ]; then \
-      tag="$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)"; \
-    else \
-      tag="$XRAY_VERSION"; \
-    fi; \
-    # 选择资产名
-    case "$TARGETARCH" in \
+RUN set -euo pipefail; \
+    apk add --no-cache curl unzip ca-certificates; \
+    # 1) 选择资产名（优先 v8a；arm64 再尝试 fallback）
+    case "${TARGETARCH:-amd64}" in \
       amd64) asset="Xray-linux-64.zip" ;; \
       arm64) asset="Xray-linux-arm64-v8a.zip" ;; \
       386)   asset="Xray-linux-32.zip" ;; \
       arm)   asset="Xray-linux-arm32-v7a.zip" ;; \
       *)     asset="Xray-linux-64.zip" ;; \
     esac; \
-    url="https://github.com/XTLS/Xray-core/releases/download/${tag}/${asset}"; \
-    echo "Downloading: ${url}"; \
-    curl -fL "$url" -o /tmp/core.zip; \
+    base="https://github.com/XTLS/Xray-core/releases"; \
+    if [ "$XRAY_VERSION" = "latest" ]; then \
+      url_primary="${base}/latest/download/${asset}"; \
+      url_fallback_arm64="${base}/latest/download/Xray-linux-arm64.zip"; \
+    else \
+      url_primary="${base}/download/${XRAY_VERSION}/${asset}"; \
+      url_fallback_arm64="${base}/download/${XRAY_VERSION}/Xray-linux-arm64.zip"; \
+    fi; \
+    echo "Downloading primary: ${url_primary}"; \
+    if ! curl -fL "$url_primary" -o /tmp/core.zip; then \
+      if [ "${TARGETARCH:-amd64}" = "arm64" ]; then \
+        echo "Primary asset not found. Trying fallback: ${url_fallback_arm64}"; \
+        curl -fL "$url_fallback_arm64" -o /tmp/core.zip; \
+      else \
+        echo "Download failed: ${url_primary}"; \
+        exit 1; \
+      fi; \
+    fi; \
     unzip -q /tmp/core.zip -d /tmp/x; \
-    # 找到可执行文件并重命名为 reverxe
-    b="$(find /tmp/x -type f -name 'xray' -perm -u+x | head -n1)"; \
-    test -n "$b" || (echo "ERROR: 未找到可执行文件 xray" && exit 1); \
+    # 2) 不依赖 -perm，直接按文件名找
+    b="$(find /tmp/x -type f -name xray -print -quit)"; \
+    if [ -z "$b" ]; then \
+      echo "ERROR: 解压包内找不到二进制 'xray'。内容如下："; \
+      ls -lR /tmp/x; \
+      exit 1; \
+    fi; \
     install -m 0755 "$b" /reverxe
 
 FROM alpine:3.19
 
-# 运行期依赖
+# 运行期依赖（entrypoint 里会用 jq 生成 config.json）
 RUN apk add --no-cache ca-certificates tzdata bash jq
 
 # 这些 ENV 会在群晖 UI 中显示，便于填写
@@ -48,7 +61,7 @@ ENV BIN_PATH=/usr/local/bin/reverxe \
 # 放置二进制
 COPY --from=builder /reverxe /usr/local/bin/reverxe
 
-# 写入入口脚本（注意：这一行必须以 <<'EOF' 结尾，后面不能接 ; 或 \）
+# 写入入口脚本（注意 heredoc 语法）
 RUN set -eux; \
   cat > /usr/local/bin/entrypoint <<'EOF'
 #!/usr/bin/env bash
