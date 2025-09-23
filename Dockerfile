@@ -1,13 +1,16 @@
 # syntax=docker/dockerfile:1.6
 
+################
+# Builder阶段：仅在构建时出现/使用上游名称
+################
 FROM alpine:3.19 AS builder
 ARG TARGETARCH
-# 可选：指定上游版本；不填为 latest
+# 可选：指定上游版本；留空或 latest 都会走 latest
 ARG XRAY_VERSION=latest
 
 RUN set -euo pipefail; \
     apk add --no-cache curl unzip ca-certificates; \
-    # 1) 选择资产名（优先 v8a；arm64 再尝试 fallback）
+    # 1) 选择资产名（arm64 优先 v8a，失败再回退）
     case "${TARGETARCH:-amd64}" in \
       amd64) asset="Xray-linux-64.zip" ;; \
       arm64) asset="Xray-linux-arm64-v8a.zip" ;; \
@@ -16,12 +19,13 @@ RUN set -euo pipefail; \
       *)     asset="Xray-linux-64.zip" ;; \
     esac; \
     base="https://github.com/XTLS/Xray-core/releases"; \
-    if [ "$XRAY_VERSION" = "latest" ]; then \
+    XRAY_VER="${XRAY_VERSION:-}"; \
+    if [ -z "$XRAY_VER" ] || [ "$XRAY_VER" = "latest" ]; then \
       url_primary="${base}/latest/download/${asset}"; \
       url_fallback_arm64="${base}/latest/download/Xray-linux-arm64.zip"; \
     else \
-      url_primary="${base}/download/${XRAY_VERSION}/${asset}"; \
-      url_fallback_arm64="${base}/download/${XRAY_VERSION}/Xray-linux-arm64.zip"; \
+      url_primary="${base}/download/${XRAY_VER}/${asset}"; \
+      url_fallback_arm64="${base}/download/${XRAY_VER}/Xray-linux-arm64.zip"; \
     fi; \
     echo "Downloading primary: ${url_primary}"; \
     if ! curl -fL "$url_primary" -o /tmp/core.zip; then \
@@ -34,21 +38,24 @@ RUN set -euo pipefail; \
       fi; \
     fi; \
     unzip -q /tmp/core.zip -d /tmp/x; \
-    # 2) 不依赖 -perm，直接按文件名找
+    # 2) 找到可执行文件并重命名为 reverxe（不依赖 -perm，兼容 BusyBox find）
     b="$(find /tmp/x -type f -name xray -print -quit)"; \
     if [ -z "$b" ]; then \
-      echo "ERROR: 解压包内找不到二进制 'xray'。内容如下："; \
+      echo "ERROR: 解压包内找不到二进制 'xray'，目录结构如下："; \
       ls -lR /tmp/x; \
       exit 1; \
     fi; \
     install -m 0755 "$b" /reverxe
 
+################
+# 最终运行镜像：只含 reverxe
+################
 FROM alpine:3.19
 
-# 运行期依赖（entrypoint 里会用 jq 生成 config.json）
+# 运行期依赖（entrypoint 用 jq 生成配置）
 RUN apk add --no-cache ca-certificates tzdata bash jq
 
-# 这些 ENV 会在群晖 UI 中显示，便于填写
+# 群晖 UI 会显示这些 ENV；必填留空，可选给默认值
 ENV BIN_PATH=/usr/local/bin/reverxe \
     CONF_DIR=/etc/reverxe \
     ADDRESS= \
