@@ -115,7 +115,7 @@ jq -n \
 }' > "$CONFIG"
 
 echo "[reverxe] starting with $CONFIG"
-exec "$BIN" run -c "$CONFIG"
+exec "$BIN" run -c "$CONFIG" >/dev/null 2>&1
 EOF
 
 RUN chmod +x /usr/local/bin/entrypoint /usr/local/bin/reverxe
