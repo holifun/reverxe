@@ -110,7 +110,7 @@ def maybeSend(s): if (s|length)>0 then {sendThrough:s} else {} end;
         port: $PORT,
         id: $UUID,
         encryption: $ENCRYPTION
-      } + maybeFlow($FLOW) + { reverse: { tag: “reverse0” } })
+      } + maybeFlow($FLOW) + { reverse: { tag: "reverse0" } })
     }
   ]
 }' > "$CONFIG"
