@@ -63,7 +63,7 @@ ENV BIN_PATH=/usr/local/bin/reverxe \
     UUID= \
     ENCRYPTION=none \
     FLOW= \
-    REVERSE_TAG=reverse0
+    SEND=
 
 # 放置二进制
 COPY --from=builder /reverxe /usr/local/bin/reverxe
@@ -86,7 +86,7 @@ CONFIG="${CONF_DIR}/config.json"
 # 可选项默认值
 : "${ENCRYPTION:=none}"
 : "${FLOW:=}"
-: "${REVERSE_TAG:=reverse0}"
+: "${SEND:=}"
 
 mkdir -p "$CONF_DIR"
 
@@ -97,11 +97,12 @@ jq -n \
   --arg UUID "$UUID" \
   --arg ENCRYPTION "$ENCRYPTION" \
   --arg FLOW "$FLOW" \
-  --arg REVERSE_TAG "$REVERSE_TAG" \
+  --arg SEND "$SEND" \
 'def maybeFlow(f): if (f|length)>0 then {flow:f} else {} end;
+def maybeSend(s): if (s|length)>0 then {sendThrough:s} else {} end;
 {
   outbounds: [
-    { protocol: "direct" },
+    ({ protocol: "freedom" } + maybeSend($SEND)),
     {
       protocol: "vless",
       settings: ({
@@ -109,7 +110,7 @@ jq -n \
         port: $PORT,
         id: $UUID,
         encryption: $ENCRYPTION
-      } + maybeFlow($FLOW) + { reverse: { tag: $REVERSE_TAG } })
+      } + maybeFlow($FLOW) + { reverse: { tag: “reverse0” } })
     }
   ]
 }' > "$CONFIG"
